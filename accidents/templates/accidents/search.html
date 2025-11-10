@@ -1,0 +1,152 @@
+{% extends 'accidents/base.html' %}
+
+{% block title %}Tìm kiếm tai nạn{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script>
+    let mapInstance = null;
+    let markers = {};
+
+    {% if results %}
+    mapInstance = L.map('map').setView([10.7769, 106.7009], 10); // Mặc định tọa độ TP.HCM
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(mapInstance);
+
+    {% for accident in results %}
+        {% if accident.lat and accident.lng %}
+        markers[{{ accident.id }}] = L.marker([{{ accident.lat }}, {{ accident.lng }}]).addTo(mapInstance)
+            .bindPopup(
+                '<strong>{{ accident.location }}</strong><br>' +
+                'Loại: {{ accident.get_accident_type_display }}<br>' +
+                'Thời gian: {{ accident.datetime|date:"d/m/Y H:i" }}<br>' +
+                'Mức độ: {{ accident.get_damage_level_display }}<br>' +
+                '<a href="{% url "accident_detail" accident.id %}" class="btn btn-sm btn-primary">Chi tiết vụ tai nạn</a>'
+            );
+        {% endif %}
+    {% endfor %}
+
+    // Fit map to show all markers nếu có
+    if (Object.keys(markers).length > 0) {
+        var group = new L.featureGroup(Object.values(markers));
+        mapInstance.fitBounds(group.getBounds(), { padding: [20, 20] });
+    }
+
+    // Event listener cho table rows
+    document.addEventListener('DOMContentLoaded', function() {
+        const tableBody = document.querySelector('tbody');
+        if (tableBody) {
+            tableBody.addEventListener('click', function(e) {
+                const row = e.target.closest('tr');
+                if (row && mapInstance) {
+                    const accidentId = row.dataset.accidentId;
+                    const lat = parseFloat(row.dataset.lat);
+                    const lng = parseFloat(row.dataset.lng);
+                    if (!isNaN(lat) && !isNaN(lng) && markers[accidentId]) {
+                        // Pan to the location
+                        mapInstance.panTo([lat, lng], { animate: true, duration: 0.5 });
+                        // Open the popup
+                        markers[accidentId].openPopup();
+                    }
+                }
+            });
+        }
+    });
+    {% endif %}
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h4 class="mb-0">🔍 Tìm kiếm vụ tai nạn xảy ra trong thời gian X</h4>
+            </div>
+            <div class="card-body">
+                <form method="post" class="mb-4">
+                    {% csrf_token %}
+                    <div class="row">
+                        <div class="col-md-5">
+                            <div class="mb-3">
+                                <label for="{{ form.start_date.id_for_label }}" class="form-label">Từ ngày</label>
+                                {{ form.start_date }}
+                                {% if form.start_date.errors %}
+                                    <div class="text-danger">{{ form.start_date.errors }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-5">
+                            <div class="mb-3">
+                                <label for="{{ form.end_date.id_for_label }}" class="form-label">Đến ngày</label>
+                                {{ form.end_date }}
+                                {% if form.end_date.errors %}
+                                    <div class="text-danger">{{ form.end_date.errors }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">&nbsp;</label>
+                            <button type="submit" class="btn btn-info w-100">Tìm kiếm</button>
+                        </div>
+                    </div>
+                </form>
+
+                {% if results %}
+                    <h5>Kết quả tìm kiếm: <span class="badge bg-success">{{ results|length }} vụ</span></h5>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>STT</th>
+                                    <th>Điểm tai nạn</th>
+                                    <th>Loại</th>
+                                    <th>Thời gian</th>
+                                    <th>Mức độ</th>
+                                    <th>Quận/Huyện</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for accident in results %}
+                                <tr data-accident-id="{{ accident.id }}"
+                                    {% if accident.lat and accident.lng %}data-lat="{{ accident.lat }}" data-lng="{{ accident.lng }}"{% endif %}>
+                                    <td>{{ forloop.counter }}</td>
+                                    <td>{{ accident.location }}</td>
+                                    <td>{{ accident.get_accident_type_display }}</td>
+                                    <td>{{ accident.datetime|date:"d/m/Y H:i" }}</td>
+                                    <td>
+                                        {% if accident.damage_level == 'rat_nang' %}
+                                            <span class="badge bg-danger">{{ accident.get_damage_level_display }}</span>
+                                        {% elif accident.damage_level == 'nang' %}
+                                            <span class="badge bg-warning">{{ accident.get_damage_level_display }}</span>
+                                        {% else %}
+                                            <span class="badge bg-info">{{ accident.get_damage_level_display }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ accident.get_district_display }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <hr>
+
+                    <h5>Xem trên bản đồ</h5>
+                    <div id="map" style="height: 400px; border: 1px solid #ddd; border-radius: 4px;"></div>
+                    <small class="text-muted">Bản đồ hiển thị vị trí các vụ tai nạn (nếu có tọa độ). Click vào marker để mở popup chi tiết. Click vào hàng trong bảng để di chuyển bản đồ đến vị trí vụ tai nạn đó và mở popup. Sử dụng Leaflet với OpenStreetMap.</small>
+                {% elif request.method == 'POST' %}
+                    <div class="alert alert-warning">
+                        Không tìm thấy vụ tai nạn nào trong khoảng thời gian này.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

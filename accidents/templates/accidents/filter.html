@@ -1,0 +1,210 @@
+{% extends 'accidents/base.html' %}
+
+{% block title %}Lọc tai nạn{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-secondary text-white">
+                <h4 class="mb-0 d-flex align-items-center">
+                    <i class="bi bi-funnel me-2"></i>
+                    Lọc vụ tai nạn
+                </h4>
+            </div>
+            <div class="card-body">
+                <!-- Form lọc -->
+                <form method="get" class="mb-4">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="{{ form.accident_type.id_for_label }}" class="form-label fw-medium">Loại tai nạn</label>
+                            {{ form.accident_type }}
+                            {% if form.accident_type.help_text %}<div class="form-text">{{ form.accident_type.help_text }}</div>{% endif %}
+                        </div>
+                        <div class="col-md-4">
+                            <label for="{{ form.damage_level.id_for_label }}" class="form-label fw-medium">Mức độ thiệt hại</label>
+                            {{ form.damage_level }}
+                            {% if form.damage_level.help_text %}<div class="form-text">{{ form.damage_level.help_text }}</div>{% endif %}
+                        </div>
+                        <div class="col-md-4">
+                            <label for="{{ form.district.id_for_label }}" class="form-label fw-medium">Quận/Huyện</label>
+                            {{ form.district }}
+                            {% if form.district.help_text %}<div class="form-text">{{ form.district.help_text }}</div>{% endif %}
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-12">
+                            <button type="submit" class="btn btn-secondary me-2">
+                                <i class="bi bi-funnel me-1"></i>
+                                Lọc kết quả
+                            </button>
+                            <a href="{% url 'filter_accidents' %}" class="btn btn-outline-secondary">
+                                <i class="bi bi-arrow-clockwise me-1"></i>
+                                Xóa bộ lọc
+                            </a>
+                        </div>
+                    </div>
+                </form>
+
+                <!-- Kết quả -->
+                {% if results %}
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="mb-0">
+                            <i class="bi bi-list-ul me-2 text-success"></i>
+                            Kết quả lọc
+                        </h5>
+                        <span class="badge bg-success fs-6">{{ results|length }} vụ</span>
+                    </div>
+                    
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover align-middle">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th scope="col" style="width: 5%;">STT</th>
+                                    <th scope="col">Điểm tai nạn</th>
+                                    <th scope="col" style="width: 15%;">Loại</th>
+                                    <th scope="col" style="width: 15%;">Thời gian</th>
+                                    <th scope="col" style="width: 15%;">Mức độ</th>
+                                    <th scope="col" style="width: 15%;">Quận/Huyện</th>
+                                    <th scope="col" style="width: 15%;">Tọa độ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for accident in results %}
+                                <tr>
+                                    <th scope="row">{{ forloop.counter }}</th>
+                                    <td>
+                                        <small class="text-body-secondary">{{ accident.location }}</small>
+                                    </td>
+                                    <td>
+                                        <span class="badge badge-type-{{ accident.accident_type }} rounded-pill">
+                                            {{ accident.get_accident_type_display }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <small class="text-body">{{ accident.datetime|date:"d/m/Y H:i" }}</small>
+                                    </td>
+                                    <td>
+                                        <span class="badge badge-damage-{{ accident.damage_level }} rounded-pill">
+                                            {{ accident.get_damage_level_display }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <small class="fw-medium">{{ accident.get_district_display }}</small>
+                                    </td>
+                                    <td>
+                                        <small class="text-muted">
+                                            <i class="bi bi-geo-alt me-1"></i>
+                                            {{ accident.latitude|floatformat:4 }}, {{ accident.longitude|floatformat:4 }}
+                                        </small>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="7" class="text-center py-4">
+                                        <i class="bi bi-inbox display-4 text-muted"></i>
+                                        <p class="text-muted mb-0">Không có dữ liệu</p>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Thống kê nhanh -->
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="card bg-light border-0">
+                                <div class="card-body">
+                                    <h6 class="card-title mb-3">
+                                        <i class="bi bi-graph-up me-2 text-info"></i>
+                                        Thống kê nhanh
+                                    </h6>
+                                    <div class="row text-center">
+                                        <div class="col-md-3 mb-2">
+                                            <div class="fw-bold text-primary fs-5">{{ total }}</div>
+                                            <small class="text-muted">Tổng số vụ</small>
+                                        </div>
+                                        <div class="col-md-3 mb-2">
+                                            <div class="fw-bold text-danger fs-5">{{ xe_may_count }}</div>
+                                            <small class="text-muted">Xe máy</small>
+                                        </div>
+                                        <div class="col-md-3 mb-2">
+                                            <div class="fw-bold text-primary fs-5">{{ o_to_count }}</div>
+                                            <small class="text-muted">Ô tô</small>
+                                        </div>
+                                        <div class="col-md-3 mb-2">
+                                            <div class="fw-bold text-danger fs-5">{{ rat_nang_count }}</div>
+                                            <small class="text-muted">Rất nặng</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Pagination nếu cần (giả sử có paginator) -->
+                    {% if is_paginated %}
+                    <nav aria-label="Pagination" class="mt-4">
+                        <ul class="pagination justify-content-center">
+                            {% if page_obj.has_previous %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page=1{% for key,value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Đầu</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% for key,value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Trước</a>
+                                </li>
+                            {% endif %}
+                            {% for num in page_obj.paginator.page_range %}
+                                <li class="page-item {% if page_obj.number == num %}active{% endif %}">
+                                    <a class="page-link" href="?page={{ num }}{% for key,value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">{{ num }}</a>
+                                </li>
+                            {% endfor %}
+                            {% if page_obj.has_next %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.next_page_number }}{% for key,value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Sau</a>
+                                </li>
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% for key,value in request.GET.items %}{% if key != 'page' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">Cuối</a>
+                                </li>
+                            {% endif %}
+                        </ul>
+                    </nav>
+                    {% endif %}
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="bi bi-search display-1 text-muted mb-3"></i>
+                        <h5 class="text-muted">
+                            {% if request.GET %}
+                                Không tìm thấy vụ tai nạn nào phù hợp với bộ lọc.
+                            {% else %}
+                                Vui lòng chọn bộ lọc để xem kết quả.
+                            {% endif %}
+                        </h5>
+                        <p class="text-muted">Thử thay đổi các tiêu chí lọc để có kết quả tốt hơn.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CSS cho badges (thêm vào extra_css nếu cần) -->
+<style>
+    .badge-type-xe_may { background-color: #dc3545 !important; color: white; }
+    .badge-type-o_to { background-color: #0d6efd !important; color: white; }
+    .badge-type-xe_tai { background-color: #fd7e14 !important; color: white; }
+    .badge-type-nguoi_di_bo { background-color: #6f42c1 !important; color: white; }
+    .badge-type-khac { background-color: #6c757d !important; color: white; }
+    
+    .badge-damage-rat_nang { background-color: #dc3545 !important; color: white; }
+    .badge-damage-nang { background-color: #ffc107 !important; color: #000; }
+    .badge-damage-trung_binh { background-color: #17a2b8 !important; color: white; }
+    .badge-damage-nhe { background-color: #198754 !important; color: white; }
+    
+    @media (max-width: 768px) {
+        .table th, .table td { font-size: 0.875rem; padding: 0.5rem; }
+        .table-responsive { border-radius: 0.375rem; }
+    }
+</style>
+{% endblock %}
