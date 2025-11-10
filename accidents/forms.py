@@ -1,3 +1,4 @@
+# accidents/forms.py
 from django import forms
 from .models import Accident
 
@@ -5,100 +6,30 @@ class AccidentForm(forms.ModelForm):
     class Meta:
         model = Accident
         fields = ['location', 'latitude', 'longitude', 'accident_type', 
-                  'datetime', 'damage_level', 'district']
+                  'datetime', 'damage_level', 'commune_code']
         widgets = {
-            'location': forms.TextInput(attrs={
+            'location': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Ví dụ: Cầu Rồng, Đà Nẵng'}),
+            'latitude': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.000001'}),
+            'longitude': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.000001'}),
+            'accident_type': forms.Select(attrs={'class': 'form-control'}),
+            'datetime': forms.DateTimeInput(attrs={'class': 'form-control', 'type': 'datetime-local'}),
+            'damage_level': forms.Select(attrs={'class': 'form-control'}),
+            'commune_code': forms.TextInput(attrs={
                 'class': 'form-control',
-                'placeholder': 'Ví dụ: Cầu Cần Thơ, Chợ Cái Răng'
-            }),
-            'latitude': forms.NumberInput(attrs={
-                'class': 'form-control',
-                'step': '0.000001',
-                'placeholder': 'Ví dụ: 10.0452'
-            }),
-            'longitude': forms.NumberInput(attrs={
-                'class': 'form-control',
-                'step': '0.000001',
-                'placeholder': 'Ví dụ: 105.7469'
-            }),
-            'accident_type': forms.Select(attrs={
-                'class': 'form-control'
-            }),
-            'datetime': forms.DateTimeInput(attrs={
-                'class': 'form-control',
-                'type': 'datetime-local'
-            }),
-            'damage_level': forms.Select(attrs={
-                'class': 'form-control'
-            }),
-            'district': forms.Select(attrs={
-                'class': 'form-control'
+                'placeholder': 'Ví dụ: 81519002',
+                'readonly': 'readonly'
             }),
         }
-
-class SearchForm(forms.Form):
-    start_date = forms.DateTimeField(
-        label='Từ ngày',
-        widget=forms.DateTimeInput(attrs={
-            'class': 'form-control',
-            'type': 'datetime-local'
-        }),
-        required=True
-    )
-    end_date = forms.DateTimeField(
-        label='Đến ngày',
-        widget=forms.DateTimeInput(attrs={
-            'class': 'form-control',
-            'type': 'datetime-local'
-        }),
-        required=True
-    )
-
-class FilterForm(forms.Form):
-    accident_type = forms.ChoiceField(
-        label='Loại tai nạn',
-        choices=[('', 'Tất cả')] + Accident.ACCIDENT_TYPES,
-        widget=forms.Select(attrs={
-            'class': 'form-control'
-        }),
-        required=False
-    )
-    damage_level = forms.ChoiceField(
-        label='Mức độ thiệt hại',
-        choices=[('', 'Tất cả')] + Accident.DAMAGE_LEVELS,
-        widget=forms.Select(attrs={
-            'class': 'form-control'
-        }),
-        required=False
-    )
-    district = forms.ChoiceField(
-        label='Quận/Huyện',
-        choices=[('', 'Tất cả')] + Accident.CANTHO_DISTRICTS,
-        widget=forms.Select(attrs={
-            'class': 'form-control'
-        }),
-        required=False
-    )
 
 class AccidentFilterForm(forms.Form):
     accident_type = forms.ChoiceField(
         choices=[('', '--- Tất cả loại tai nạn ---')] + Accident.ACCIDENT_TYPES,
-        required=False,
-        label='Loại tai nạn',
+        required=False, label='Loại tai nạn',
         widget=forms.Select(attrs={'class': 'form-select'})
     )
-
     damage_level = forms.ChoiceField(
         choices=[('', '--- Tất cả mức độ ---')] + Accident.DAMAGE_LEVELS,
-        required=False,
-        label='Mức độ thiệt hại',
-        widget=forms.Select(attrs={'class': 'form-select'})
-    )
-
-    district = forms.ChoiceField(
-        choices=[('', '--- Tất cả quận/huyện ---')] + Accident.CANTHO_DISTRICTS,
-        required=False,
-        label='Quận/Huyện',
+        required=False, label='Mức độ thiệt hại',
         widget=forms.Select(attrs={'class': 'form-select'})
     )
 

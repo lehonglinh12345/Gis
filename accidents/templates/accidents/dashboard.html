@@ -1,0 +1,626 @@
+{% extends 'accidents/base.html' %}
+
+{% block title %}Dashboard - Quản lý Tai nạn Giao thông Việt Nam{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card shadow-sm" style="position: sticky; top: 20px;">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">Bản đồ Tai nạn Giao thông Toàn quốc</h4>
+                <button id="locate-btn" class="btn btn-sm btn-light" title="Vị trí hiện tại">
+                    <i class="bi bi-crosshair"></i>
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div id="map" style="height: 75vh;"></div>
+            </div>
+            <div class="card-footer bg-light">
+                <small class="text-muted">
+                    Click bản đồ để thêm vụ • Thu nhỏ xem thống kê • Gõ tên phường để tìm
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="accordion" id="controlsAccordion">
+
+            <!-- TÌM KIẾM PHƯỜNG/XÃ -->
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSearch">
+                        Tìm kiếm Phường/Xã
+                    </button>
+                </h2>
+                <div id="collapseSearch" class="accordion-collapse collapse show">
+                    <div class="card-body">
+                        <input type="text" id="search-commune" class="form-control" placeholder="Gõ tên phường/xã...">
+                        <div id="search-results" class="mt-2" style="max-height: 200px; overflow-y: auto; font-size: 0.9rem;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LỌC THEO TỈNH -->
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFilter">
+                        Lọc & Tìm kiếm
+                    </button>
+                </h2>
+                <div id="collapseFilter" class="accordion-collapse collapse">
+                    <div class="card-body">
+                        <form id="filter-form">
+                            <div class="mb-3">
+                                <label class="form-label">Tỉnh/Thành</label>
+                                <select id="province-filter" class="form-select">
+                                    <option value="">Tất cả tỉnh</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Loại tai nạn</label>
+                                {{ filter_form.accident_type }}
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Mức độ thiệt hại</label>
+                                {{ filter_form.damage_level }}
+                            </div>
+                            <hr>
+                            <div class="mb-3">
+                                <label class="form-label">Từ ngày</label>
+                                {{ search_form.start_date }}
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Đến ngày</label>
+                                {{ search_form.end_date }}
+                            </div>
+                            <button type="submit" class="btn btn-info w-100">Cập nhật</button>
+                            <button type="button" id="reset-filter-btn" class="btn btn-outline-secondary w-100 mt-2">Xóa lọc</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- THÊM VỤ TAI NẠN -->
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseAdd">
+                        Thêm vụ tai nạn
+                    </button>
+                </h2>
+                <div id="collapseAdd" class="accordion-collapse collapse">
+                    <div class="card-body">
+                        <div id="geocode-alert-container"></div>
+                        <form id="add-accident-form" method="post">
+                            {% csrf_token %}
+                            {{ add_form.as_p }}
+                            <button type="submit" class="btn btn-primary w-100">
+                                <span class="spinner-border spinner-border-sm d-none" id="add-spinner"></span>
+                                Thêm vụ tai nạn
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- THỐNG KÊ -->
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseStats">
+                        Thống kê Phường/Xã
+                    </button>
+                </h2>
+                <div id="collapseStats" class="accordion-collapse collapse">
+                    <div class="card-body">
+                        <div id="commune-stats-detail" class="mb-3">
+                            <p class="text-muted small">Click vào phường/xã để xem chi tiết.</p>
+                        </div>
+                        <hr>
+                        <canvas id="chartDistrict" style="max-height: 400px;"></canvas>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // --- BIẾN TOÀN CỤC ---
+    let map, tempMarker, choroplethLayer, markerLayerGroup, chartInstance, statsCollapse, lastClickedLayer;
+    let statsMap = {}, geoJsonData = null, provinceList = new Set();
+    let currentFilterParams = '', currentProvince = '';
+    let communeLayerCache = null;
+    let choroplethInitialized = false;
+    let visibleCommunes = new Set();
+    let fullGeoJsonData = null; // Cache toàn quốc
+    let isFittingBounds = false;
+    let isLoadingStats = false; // ✅ chống vòng lặp load thống kê
+
+    const GEOJSON_ID_FIELD = 'maXa';
+    const GEOJSON_NAME_FIELD = 'tenXa';
+    const GEOJSON_PROVINCE_FIELD = 'tenTinh';
+
+    // --- HÀM FIT AN TOÀN ---
+    function safeFitBounds(bounds, options = {}) {
+        if (isFittingBounds) return; // Ngăn vòng lặp
+        isFittingBounds = true;
+        try {
+            map.fitBounds(bounds, options);
+        } catch (error) {
+            console.error('Error in safeFitBounds:', error);
+        } finally {
+            isFittingBounds = false; 
+        }
+    }
+    // --- KHỞI TẠO BẢN ĐỒ ---
+    function initMap() {
+        map = L.map('map').setView([16.0, 107.0], 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        map.on('click', onMapClick);
+        map.on('zoomend', debounce(updateLayersVisibility, 200));
+        markerLayerGroup = L.layerGroup().addTo(map);
+        fetch('/api/get_accidents/')
+        .then(res => res.json())
+        .then(data => {
+            markerLayerGroup.clearLayers(); // Xóa marker cũ nếu có
+            data.accidents.forEach(accident => {
+                const marker = L.marker([accident.lat, accident.lng])
+                    .bindPopup(`
+                        <b>${accident.location}</b><br>
+                        Loại: ${accident.type_display}<br>
+                        Mức độ: ${accident.damage}<br>
+                        Thời gian: ${accident.datetime}
+                    `);
+                markerLayerGroup.addLayer(marker);
+            });
+        });
+        loadAccidentMarkers();
+    }
+    
+    // --- DEBOUNCE ---
+    function debounce(func, wait) {
+        let timeout;
+        return function (...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    // --- TẢI GEOJSON ---
+    async function loadGeoJsonForProvince(province = '') {
+        try {
+            showLoading(true);
+
+            if (!fullGeoJsonData) {
+                const res = await fetch('/static/geojson/DiaPhan_Xa_2025.geojson');
+                if (!res.ok) throw new Error('Không tải được GeoJSON');
+                fullGeoJsonData = await res.json();
+
+                fullGeoJsonData.features.forEach(f => provinceList.add(f.properties[GEOJSON_PROVINCE_FIELD]));
+                populateProvinceFilter();
+            }
+
+            geoJsonData = province
+                ? { ...fullGeoJsonData, features: fullGeoJsonData.features.filter(f => f.properties[GEOJSON_PROVINCE_FIELD] === province) }
+                : fullGeoJsonData;
+
+            updateCommuneLayerCache();
+            setupSearchCommune();
+            loadStatistics();
+        } catch (err) {
+            console.error('Lỗi tải GeoJSON:', err);
+            alert('Không tải được dữ liệu hành chính.');
+        } finally {
+            showLoading(false);
+        }
+    }
+
+    function updateCommuneLayerCache() {
+        if (!geoJsonData) return;
+        communeLayerCache = L.geoJSON(geoJsonData);
+    }
+
+    function populateProvinceFilter() {
+        const select = document.getElementById('province-filter');
+        select.innerHTML = '<option value="">Tất cả tỉnh</option>';
+        [...provinceList].sort().forEach(prov => {
+            const opt = document.createElement('option');
+            opt.value = prov;
+            opt.textContent = prov;
+            select.appendChild(opt);
+        });
+    }
+
+    // --- TÌM KIẾM PHƯỜNG/XÃ ---
+    function setupSearchCommune() {
+        const input = document.getElementById('search-commune');
+        input.removeEventListener('input', searchHandler);
+        input.addEventListener('input', searchHandler);
+    }
+
+    function searchHandler(e) {
+        const query = e.target.value.toLowerCase().trim();
+        const results = document.getElementById('search-results');
+        results.innerHTML = '';
+        if (!query || !geoJsonData) return;
+
+        const matches = geoJsonData.features
+            .filter(f => f.properties[GEOJSON_NAME_FIELD].toLowerCase().includes(query))
+            .slice(0, 10);
+
+        if (matches.length === 0) {
+            results.innerHTML = '<small class="text-muted">Không tìm thấy</small>';
+            return;
+        }
+
+        matches.forEach(f => {
+            const p = f.properties;
+            const div = document.createElement('div');
+            div.className = 'p-2 border-bottom cursor-pointer hover-bg-light small';
+            div.innerHTML = `<strong>${p[GEOJSON_NAME_FIELD]}</strong><br><small class="text-muted">${p[GEOJSON_PROVINCE_FIELD]}</small>`;
+            div.onclick = () => {
+                const layer = L.geoJSON(f).addTo(map);
+                const currentZoom = map.getZoom();
+                if (currentZoom < 12) {
+                    safeFitBounds(layer.getBounds(), { maxZoom: 15 });
+                }
+
+                document.getElementById('search-commune').value = p[GEOJSON_NAME_FIELD];
+                results.innerHTML = '';
+                setTimeout(() => map.removeLayer(layer), 3000);
+            };
+            results.appendChild(div);
+        });
+    }
+
+    // --- LỌC TỈNH ---
+    document.getElementById('province-filter').addEventListener('change', e => {
+        currentProvince = e.target.value;
+        loadGeoJsonForProvince(currentProvince);
+        if (currentProvince) {
+            zoomToProvince(currentProvince);
+        } else {
+            map.setView([16.0, 107.0], 6);
+        }
+        applyFilters();
+    });
+
+    function zoomToProvince(provinceName) {
+        if (!geoJsonData || isFittingBounds) return;
+        const features = geoJsonData.features.filter(f => f.properties[GEOJSON_PROVINCE_FIELD] === provinceName);
+        if (features.length === 0) return;
+        const layer = L.geoJSON(features);
+        safeFitBounds(layer.getBounds(), { padding: [50, 50], maxZoom: 11 });
+    }
+
+    // --- ĐỊNH VỊ ---
+    function autoLocateAndZoom() {
+        if (!navigator.geolocation) {
+            showLocationAlert('Trình duyệt không hỗ trợ định vị.');
+            loadGeoJsonForProvince();
+            return;
+        }
+
+        showLocationAlert('Đang lấy vị trí...', 'info');
+
+        navigator.geolocation.getCurrentPosition(
+            async pos => {
+                const lat = pos.coords.latitude;
+                const lng = pos.coords.longitude;
+
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10&addressdetails=1`);
+                    const data = await res.json();
+                    const province = data.address?.state || data.address?.province || data.address?.city;
+
+                    if (province && fullGeoJsonData) {
+                        const foundProv = [...provinceList].find(p => p.includes(province) || province.includes(p));
+                        if (foundProv) {
+                            const select = document.getElementById('province-filter');
+                            select.value = foundProv;
+                            currentProvince = foundProv;
+                            loadGeoJsonForProvince(currentProvince);
+                            zoomToProvince(currentProvince);
+                            showLocationAlert(`Đã phóng to: ${currentProvince}`, 'success');
+                        }
+                    }
+                } catch {
+                    showLocationAlert('Lỗi kết nối Nominatim.', 'danger');
+                }
+
+                L.circleMarker([lat, lng], { radius: 8, color: '#007bff', fillOpacity: 0.8 })
+                    .addTo(map).bindPopup('Vị trí của bạn').openPopup();
+                map.setView([lat, lng], 11);
+            },
+            err => {
+                let msg = 'Không lấy được vị trí.';
+                if (err.code === 1) msg = 'Bạn chưa cho phép truy cập vị trí.';
+                showLocationAlert(msg + ' Vui lòng bật vị trí trong cài đặt.', 'danger');
+                loadGeoJsonForProvince();
+            },
+            { enableHighAccuracy: true, timeout: 10000 }
+        );
+    }
+
+    function showLocationAlert(msg, type = 'info') {
+        const container = document.getElementById('geocode-alert-container');
+        container.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show small">${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+        setTimeout(() => container.innerHTML = '', 8000);
+    }
+
+    // --- THỐNG KÊ ---
+    async function loadStatistics() {
+        if (isLoadingStats) return; // ✅ chống vòng lặp
+        isLoadingStats = true;
+        try {
+            showLoading(true);
+            const params = currentFilterParams + (currentProvince ? `&province=${encodeURIComponent(currentProvince)}` : '');
+            const statsRes = await fetch("{% url 'api_get_statistics' %}" + (params ? `?${params}` : ''));
+            const statsData = await statsRes.json();
+            statsMap = statsData.stats_map || {};
+
+            visibleCommunes.clear();
+            Object.keys(statsMap).forEach(id => visibleCommunes.add(id));
+
+            const filteredFeatures = geoJsonData.features.filter(f => visibleCommunes.has(f.properties[GEOJSON_ID_FIELD]));
+
+            if (!choroplethInitialized) {
+                choroplethLayer = L.geoJson(filteredFeatures, {
+                    style: () => ({ fillColor: '#f8f9fa', weight: 1.5, color: 'white', fillOpacity: 0.7 }),
+                    onEachFeature: (feature, layer) => {
+                        layer._featureId = feature.properties[GEOJSON_ID_FIELD];
+                        layer._featureProps = feature.properties;
+                    }
+                }).addTo(map);
+                choroplethInitialized = true;
+            } else {
+                choroplethLayer.clearLayers();
+                choroplethLayer.addData(filteredFeatures);
+            }
+
+            choroplethLayer.eachLayer(layer => {
+                const count = statsMap[layer._featureId] || 0;
+                const p = layer._featureProps;
+                layer.setStyle({ fillColor: getChoroplethColor(count) });
+                layer.bindTooltip(`<strong>${p[GEOJSON_NAME_FIELD]}</strong><br><b>${count} vụ</b>`, { sticky: true });
+
+                layer.off('click').on('click', () => {
+                    const currentZoom = map.getZoom();
+                    if (currentZoom < 12) {
+                        safeFitBounds(layer.getBounds(), { maxZoom: 15 });
+                    }
+
+                    if (lastClickedLayer) lastClickedLayer.setStyle({ weight: 1.5, color: 'white' });
+                    layer.setStyle({ weight: 5, color: '#000' });
+                    lastClickedLayer = layer;
+                    displayDetail(p[GEOJSON_NAME_FIELD], p[GEOJSON_PROVINCE_FIELD], count);
+                    statsCollapse.show();
+                });
+            });
+
+            renderChart(statsData.chart_data || { labels: [], counts: [] });
+            updateLayersVisibility();
+        } catch (err) {
+            console.error('Lỗi thống kê:', err);
+        } finally {
+            showLoading(false);
+            isLoadingStats = false; // ✅ mở khóa
+        }
+    }
+
+    function getChoroplethColor(c) {
+        return c > 50 ? '#800026' : c > 20 ? '#BD0026' : c > 10 ? '#E31A1C' : c > 5 ? '#FC4E2A' : c > 0 ? '#FD8D3C' : '#f8f9fa';
+    }
+
+    function displayDetail(name, prov, count) {
+        document.getElementById('commune-stats-detail').innerHTML = `
+            <h5><strong>${name}</strong></h5>
+            <p class="small text-muted mb-1">${prov}</p>
+            <p class="fs-5 mb-0">Tổng vụ: <span class="badge bg-danger fs-6">${count}</span></p>
+        `;
+    }
+
+    function renderChart(data) {
+        const ctx = document.getElementById('chartDistrict').getContext('2d');
+        if (chartInstance) chartInstance.destroy();
+        chartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: data.labels, datasets: [{ label: 'Số vụ', data: data.counts, backgroundColor: '#dc3545' }] },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        });
+    }
+
+    // --- ẨN/HIỆN THEO ZOOM ---
+    function updateLayersVisibility() {
+        if (isFittingBounds || isLoadingStats) return; // Ngăn vòng lặp
+        if (!choroplethLayer) return;
+
+        const isDetailedView = map.getZoom() >= 11;
+
+        choroplethLayer.setStyle({
+            fillOpacity: isDetailedView ? 0 : 0.7,
+            opacity: isDetailedView ? 0 : 1,
+            pointerEvents: isDetailedView ? 'none' : 'auto'
+        });
+
+        if (!map.hasLayer(markerLayerGroup)) map.addLayer(markerLayerGroup);
+    }
+
+    // --- CLICK BẢN ĐỒ ---
+    async function onMapClick(e) {
+        console.log('Click event triggered at:', e.latlng); // Log vị trí click
+        const lat = e.latlng.lat.toFixed(6);
+        const lng = e.latlng.lng.toFixed(6);
+        console.log('Latitude:', lat, 'Longitude:', lng); // Log tọa độ
+
+        const maXa = getCommuneCodeFromPoint(lat, lng);
+        console.log('Commune code found:', maXa); // Log mã phường/xã
+
+        sessionStorage.setItem('accident_lat', lat);
+        sessionStorage.setItem('accident_lng', lng);
+
+        if (tempMarker) map.removeLayer(tempMarker);
+        tempMarker = L.marker([lat, lng], {
+            icon: L.divIcon({
+                html: `<div style="background:lime; border:3px solid #000; width:24px; height:24px; border-radius:50%;"></div>`,
+                iconSize: [24, 24]
+            })
+        }).addTo(map).bindPopup(`<strong>Đang tra cứu...</strong>`).openPopup();
+
+        bootstrap.Collapse.getOrCreateInstance('#collapseAdd').show();
+
+        const alert = document.getElementById('geocode-alert-container');
+        alert.innerHTML = `<div class="alert alert-info">Đang tra cứu địa chỉ...</div>`;
+
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`);
+            const data = await res.json();
+
+            document.querySelector('[name="latitude"]').value = lat;
+            document.querySelector('[name="longitude"]').value = lng;
+            document.querySelector('[name="location"]').value = data.display_name || '';
+            document.querySelector('[name="commune_code"]').value = maXa || '';
+
+            tempMarker.setPopupContent(`<strong>${data.display_name.split(',')[0]}</strong><br>Mã Phường/Xã: <b>${maXa || 'Không xác định'}</b>`);
+            alert.innerHTML = `<div class="alert alert-success">Đã điền tự động!</div>`;
+        } catch {
+            document.querySelector('[name="location"]').value = `Lat: ${lat}, Lng: ${lng}`;
+            document.querySelector('[name="commune_code"]').value = maXa || '';
+            tempMarker.setPopupContent(`<strong>Không tra cứu được</strong><br>Mã Phường/Xã: <b>${maXa || 'Không xác định'}</b>`);
+            alert.innerHTML = `<div class="alert alert-warning">Không tra cứu được địa chỉ.</div>`;
+        }
+        setTimeout(() => alert.innerHTML = '', 5000);
+    }
+
+    function getCommuneCodeFromPoint(lat, lng) {
+        if (!geoJsonData || !geoJsonData.features) return null;
+
+        const point = turf.point([lng, lat]);
+        const targetFeatures = currentProvince
+            ? geoJsonData.features.filter(f => f.properties[GEOJSON_PROVINCE_FIELD] === currentProvince)
+            : geoJsonData.features;
+
+        for (const f of targetFeatures) {
+            if (turf.booleanPointInPolygon(point, f)) {
+                return f.properties[GEOJSON_ID_FIELD];
+            }
+        }
+        return null;
+    }
+
+
+
+    // --- LỌC ---
+    function applyFilters() {
+        const form = document.getElementById('filter-form');
+        currentFilterParams = new URLSearchParams(new FormData(form)).toString();
+        // Xóa hoặc thay thế updateAccidentMarkers nếu không cần
+        loadStatistics();
+    }
+
+    document.getElementById('filter-form').addEventListener('submit', e => {
+        e.preventDefault();
+        applyFilters();
+    });
+
+    document.getElementById('reset-filter-btn').onclick = () => {
+        document.getElementById('filter-form').reset();
+        document.getElementById('province-filter').value = '';
+        currentProvince = '';
+        currentFilterParams = '';
+        loadGeoJsonForProvince();
+        map.setView([16.0, 107.0], 6);
+        applyFilters();
+    };
+
+    // --- NÚT ĐỊNH VỊ ---
+    document.getElementById('locate-btn').onclick = () => autoLocateAndZoom();
+
+    // --- LOADING ---
+    function showLoading(show) {
+        let el = document.getElementById('map-loading');
+        if (!el && show) {
+            el = document.createElement('div');
+            el.id = 'map-loading';
+            el.innerHTML = `<div class="spinner-border text-primary" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;"></div>`;
+            document.getElementById('map').parentElement.appendChild(el);
+        }
+        if (el) el.style.display = show ? 'block' : 'none';
+    }
+
+    // --- KHỞI ĐỘNG ---
+    document.addEventListener('DOMContentLoaded', () => {
+        initMap();
+        statsCollapse = new bootstrap.Collapse('#collapseStats', { toggle: false });
+        autoLocateAndZoom();
+
+        setTimeout(() => {
+            if (!fullGeoJsonData) {
+                loadGeoJsonForProvince();
+            }
+        }, 3000);
+    });
+    document.getElementById('add-accident-form').addEventListener('submit', async function(e) {
+        e.preventDefault(); // ⚠️ Ngăn reload trang
+
+        const form = e.target;
+        const spinner = document.getElementById('add-spinner');
+        spinner.classList.remove('d-none');
+
+        const formData = new FormData(form);
+
+        try {
+            const res = await fetch("{% url 'add_accident' %}", {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: formData
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+                alert('Thêm vụ tai nạn thành công!');
+                form.reset();
+                // Nếu muốn, cập nhật lại bản đồ / thống kê ở đây
+            } else {
+                alert('Lỗi form: ' + JSON.stringify(data.errors));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Lỗi server!');
+        } finally {
+            spinner.classList.add('d-none');
+        }
+    });
+    async function loadAccidentMarkers() {
+        if (!map) return;
+
+        try {
+            const params = currentFilterParams + (currentProvince ? `&province=${encodeURIComponent(currentProvince)}` : '');
+            const res = await fetch("{% url 'api_get_accidents' %}" + (params ? `?${params}` : ''));
+            const data = await res.json();
+
+            markerLayerGroup.clearLayers(); // Xóa marker cũ
+
+            data.accidents.forEach(acc => {
+                const m = L.marker([acc.lat, acc.lng])
+                            .bindPopup(`<strong>${acc.location}</strong><br>Loại: ${acc.type_display}<br>Thiệt hại: ${acc.damage}`);
+                markerLayerGroup.addLayer(m);
+            });
+
+            updateLayersVisibility(); // đảm bảo hiển thị dựa trên zoom
+        } catch (err) {
+            console.error('Lỗi load accidents:', err);
+        }
+    }
+
+</script>
+{% endblock %}

@@ -1,31 +1,60 @@
+import json
+import os
+from django.conf import settings
 from django.shortcuts import render, redirect
 from django.contrib import messages
-from django.db.models import Count, Q
+from django.db.models import Count
+from django.http import JsonResponse
 from .models import Accident
-from .forms import AccidentForm, SearchForm, FilterForm
-import json
+from .forms import AccidentForm, AccidentSearchForm, AccidentFilterForm
+from datetime import datetime
+from django.utils import timezone
 
-def index(request):
-    """Trang chủ"""
-    return render(request, 'accidents/index.html')
+def dashboard(request):
+    context = {
+        'add_form': AccidentForm(),
+        'search_form': AccidentSearchForm(),
+        'filter_form': AccidentFilterForm(),
+    }
+    return render(request, 'accidents/dashboard.html', context)
 
 def add_accident(request):
-    """Nhập thông tin vụ tai nạn"""
     if request.method == 'POST':
         form = AccidentForm(request.POST)
         if form.is_valid():
             form.save()
-            messages.success(request, 'Đã thêm vụ tai nạn thành công!')
-            return redirect('add_accident')
-    else:
-        form = AccidentForm()
-    
-    return render(request, 'accidents/add_accident.html', {'form': form})
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'success': True})
+            messages.success(request, 'Thêm thành công!')
+        else:
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'errors': form.errors})
+            messages.error(request, 'Lỗi form.')
+    return redirect('index')
 
-def map_view(request):
-    """Hiển thị điểm tai nạn trên bản đồ"""
+# --- API: LẤY DANH SÁCH TAI NẠN ---
+def api_get_accidents(request):
     accidents = Accident.objects.all()
-    
+
+    # Lọc
+    accident_type = request.GET.get('accident_type')
+    damage_level = request.GET.get('damage_level')
+    start_date_str = request.GET.get('start_date')
+    end_date_str = request.GET.get('end_date')
+
+    if accident_type: accidents = accidents.filter(accident_type=accident_type)
+    if damage_level: accidents = accidents.filter(damage_level=damage_level)
+
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            start_datetime = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+            end_datetime = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+            accidents = accidents.filter(datetime__range=[start_datetime, end_datetime])
+        except ValueError:
+            pass
+
     accidents_data = []
     for acc in accidents:
         accidents_data.append({
@@ -37,133 +66,80 @@ def map_view(request):
             'type_display': acc.get_accident_type_display(),
             'datetime': acc.datetime.strftime('%d/%m/%Y %H:%M'),
             'damage': acc.get_damage_level_display(),
-            'district': acc.get_district_display(),
+            'damage_slug': acc.damage_level,
+            'commune_code': acc.commune_code,
         })
     
-    context = {
-        'accidents_json': json.dumps(accidents_data),
-    }
-    return render(request, 'accidents/map.html', context)
+    return JsonResponse({'accidents': accidents_data})
 
-from django.shortcuts import render
-from django.utils import timezone
-from datetime import datetime, timedelta
-from .models import Accident
-from .forms import AccidentSearchForm
+# --- API: THỐNG KÊ THEO PHƯỜNG/XÃ (maXa) ---
+def api_get_statistics(request):
+    accidents = Accident.objects.all()
+    
+    
+    # Áp dụng lọc
+    accident_type = request.GET.get('accident_type')
+    damage_level = request.GET.get('damage_level')
+    start_date_str = request.GET.get('start_date')
+    end_date_str = request.GET.get('end_date')
 
-def search_accidents(request):
-    form = AccidentSearchForm()
-    results = None
+    if accident_type: accidents = accidents.filter(accident_type=accident_type)
+    if damage_level: accidents = accidents.filter(damage_level=damage_level)
+    if start_date_str and end_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            start_datetime = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+            end_datetime = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+            accidents = accidents.filter(datetime__range=[start_datetime, end_datetime])
+        except ValueError:
+            pass
 
-    if request.method == 'POST':
-        form = AccidentSearchForm(request.POST)
-        if form.is_valid():
-            start_date = form.cleaned_data['start_date']
-            end_date = form.cleaned_data['end_date']
+    # THỐNG KÊ THEO maXa
+    commune_stats = accidents.values('commune_code').annotate(count=Count('id')).order_by('-count')
 
-            # Bao trùm toàn bộ ngày (00:00 - 23:59)
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+    labels = []
+    counts = []
+    stats_map = {}
 
-            # Nếu muốn chắc chắn dùng timezone hiện tại (VN)
-            start_datetime = timezone.make_aware(start_datetime)
-            end_datetime = timezone.make_aware(end_datetime)
+    for item in commune_stats:
+        code = item['commune_code']
+        if not code:
+            continue
+        count = item['count']
+        labels.append(code)
+        counts.append(count)
+        stats_map[code] = count  # { "81519002": 5 }
 
-            results = Accident.objects.filter(datetime__range=[start_datetime, end_datetime])
-
-    return render(request, 'accidents/search.html', {
-        'form': form,
-        'results': results
+    return JsonResponse({
+        'chart_data': {
+            'labels': labels,
+            'counts': counts
+        },
+        'stats_map': stats_map
     })
 
 
-def filter_accidents(request):
-    """Lọc vụ tai nạn theo loại, mức độ, quận/huyện"""
-    results = Accident.objects.all()
-    form = FilterForm()
+# API: LẤY GEOJSON THEO TỈNH
+def api_get_geojson_by_province(request):
+    province = request.GET.get('province')
+    if not province:
+        return JsonResponse({'error': 'Thiếu province'}, status=400)
 
-    total = results.count()
-    xe_may_count = results.filter(accident_type='xe_may').count()
-    o_to_count = results.filter(accident_type='o_to').count()
-    rat_nang_count = results.filter(damage_level='rat_nang').count()
+    # SỬA: DÙNG ĐƯỜNG DẪN ĐÚNG TRONG DJANGO
+    geojson_path = os.path.join(settings.BASE_DIR, 'accidents', 'static', 'geojson', 'DiaPhan_Xa_2025.geojson')
     
-    if request.method == 'GET' and any(request.GET.values()):
-        form = FilterForm(request.GET)
-        if form.is_valid():
-            # Áp dụng các bộ lọc
-            if form.cleaned_data.get('accident_type'):
-                results = results.filter(accident_type=form.cleaned_data['accident_type'])
-            
-            if form.cleaned_data.get('damage_level'):
-                results = results.filter(damage_level=form.cleaned_data['damage_level'])
-            
-            if form.cleaned_data.get('district'):
-                results = results.filter(district=form.cleaned_data['district'])
-                
-    
-    context = {
-        'results': results,
-        'total': total,
-        'xe_may_count': xe_may_count,
-        'o_to_count': o_to_count,
-        'rat_nang_count': rat_nang_count,
+    try:
+        with open(geojson_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return JsonResponse({'error': 'Không tìm thấy file GeoJSON'}, status=500)
+
+    filtered = {
+        'type': 'FeatureCollection',
+        'features': [
+            f for f in data['features']
+            if f['properties'].get('tenTinh') == province
+        ]
     }
-    return render(request, 'accidents/filter.html', context)
-
-def statistics(request):
-    """Thống kê số vụ tai nạn theo quận/huyện"""
-    district_stats = Accident.objects.values('district').annotate(
-        count=Count('id')
-    ).order_by('-count')
-    
-    # Thêm tên hiển thị cho quận/huyện
-    for item in district_stats:
-        district_obj = dict(Accident.CANTHO_DISTRICTS)
-        item['district_name'] = district_obj.get(item['district'], item['district'])
-    
-    districts = [item['district_name'] for item in district_stats]
-    counts = [item['count'] for item in district_stats]
-    
-    context = {
-        'district_stats': district_stats,
-        'districts_json': json.dumps(districts),
-        'counts_json': json.dumps(counts),
-    }
-    return render(request, 'accidents/statistics.html', context)
-
-from django.shortcuts import render
-from .models import Accident
-from .forms import AccidentFilterForm
-
-def filter_accidents(request):
-    form = AccidentFilterForm(request.GET or None)
-    accidents = Accident.objects.all()
-
-    # Nếu có lọc thì áp dụng
-    if form.is_valid():
-        accident_type = form.cleaned_data.get('accident_type')
-        damage_level = form.cleaned_data.get('damage_level')
-        district = form.cleaned_data.get('district')
-
-        if accident_type:
-            accidents = accidents.filter(accident_type=accident_type)
-        if damage_level:
-            accidents = accidents.filter(damage_level=damage_level)
-        if district:
-            accidents = accidents.filter(district=district)
-
-    # Thống kê nhanh
-    total = accidents.count()
-    xe_may_count = accidents.filter(accident_type='xe_may').count()
-    o_to_count = accidents.filter(accident_type='o_to').count()
-    rat_nang_count = accidents.filter(damage_level='rat_nang').count()
-
-    context = {
-        'form': form,
-        'results': accidents,
-        'total': total,
-        'xe_may_count': xe_may_count,
-        'o_to_count': o_to_count,
-        'rat_nang_count': rat_nang_count,
-    }
-    return render(request, 'accidents/filter.html', context)
+    return JsonResponse(filtered)
