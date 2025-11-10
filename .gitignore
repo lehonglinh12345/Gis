@@ -1,3 +1,17 @@
 DiaPhan_Xa_2025.geojson
 accidents/static/geojson/*.geojson
 accidents/static/geojson/DiaPhan_Xa_2025.geojson
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.log
+instance/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+dist/
