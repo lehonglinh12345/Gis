@@ -283,12 +283,14 @@
     document.getElementById('province-filter').addEventListener('change', e => {
         currentProvince = e.target.value;
         loadGeoJsonForProvince(currentProvince);
+        
         if (currentProvince) {
             zoomToProvince(currentProvince);
         } else {
             map.setView([16.0, 107.0], 6);
         }
-        applyFilters();
+
+        applyFilters();  // SẼ GỌI loadAccidentMarkers()
     });
 
     function zoomToProvince(provinceName) {
@@ -428,14 +430,64 @@
 
     function renderChart(data) {
         const ctx = document.getElementById('chartDistrict').getContext('2d');
+
+        const nameMap = {};
+        if (geoJsonData && geoJsonData.features) {
+            geoJsonData.features.forEach(f => {
+                const code = f.properties[GEOJSON_ID_FIELD];
+                const name = f.properties[GEOJSON_NAME_FIELD];
+                nameMap[code] = name;
+            });
+        }
+
+        const labels = (data.labels || []).map(code => nameMap[code] || code);
+        const counts = data.counts || [];
+
         if (chartInstance) chartInstance.destroy();
+
         chartInstance = new Chart(ctx, {
             type: 'bar',
-            data: { labels: data.labels, datasets: [{ label: 'Số vụ', data: data.counts, backgroundColor: '#dc3545' }] },
-            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Số vụ tai nạn',
+                    data: counts,
+                    backgroundColor: '#dc3545',
+                    borderColor: '#c82333',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            
+                            label: function(context) {
+                                const code = data.labels[context.dataIndex];
+                                return `${nameMap[code] || code}: ${context.raw} vụ`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { stepSize: 1 }
+                    },
+                    x: {
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45,
+                            font: { size: 11 }
+                        }
+                    }
+                }
+            }
         });
     }
-
     // --- ẨN/HIỆN THEO ZOOM ---
     function updateLayersVisibility() {
         if (isFittingBounds || isLoadingStats) return; // Ngăn vòng lặp
@@ -525,8 +577,9 @@
     function applyFilters() {
         const form = document.getElementById('filter-form');
         currentFilterParams = new URLSearchParams(new FormData(form)).toString();
-        // Xóa hoặc thay thế updateAccidentMarkers nếu không cần
-        loadStatistics();
+
+        loadAccidentMarkers();  // TẢI LẠI MARKER THEO LỌC
+        loadStatistics();       // CẬP NHẬT CHOROPLETH
     }
 
     document.getElementById('filter-form').addEventListener('submit', e => {
@@ -572,7 +625,7 @@
         }, 3000);
     });
     document.getElementById('add-accident-form').addEventListener('submit', async function(e) {
-        e.preventDefault(); // ⚠️ Ngăn reload trang
+        e.preventDefault();
 
         const form = e.target;
         const spinner = document.getElementById('add-spinner');
@@ -593,8 +646,21 @@
 
             if (data.success) {
                 alert('Thêm vụ tai nạn thành công!');
+
+                // XÓA MARKER TẠM (nếu có)
+                if (tempMarker) {
+                    map.removeLayer(tempMarker);
+                    tempMarker = null;
+                }
+
+                // ĐÓNG FORM THÊM
+                bootstrap.Collapse.getOrCreateInstance('#collapseAdd').hide();
+
+                // CẬP NHẬT DỮ LIỆU
+                await loadAccidentMarkers();  // TẢI LẠI MARKER (có vụ mới)
+                await loadStatistics();      // CẬP NHẬT CHOROPLETH + THỐNG KÊ
+
                 form.reset();
-                // Nếu muốn, cập nhật lại bản đồ / thống kê ở đây
             } else {
                 alert('Lỗi form: ' + JSON.stringify(data.errors));
             }

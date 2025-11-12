@@ -7,7 +7,7 @@ from django.db.models import Count
 from django.http import JsonResponse
 from .models import Accident
 from .forms import AccidentForm, AccidentSearchForm, AccidentFilterForm
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.utils import timezone
 
 def dashboard(request):
@@ -34,8 +34,13 @@ def add_accident(request):
 
 # --- API: LẤY DANH SÁCH TAI NẠN ---
 def api_get_accidents(request):
-    accidents = Accident.objects.all()
+    # accidents = Accident.objects.all()
+    now = timezone.now()
+    one_day_ago = now - timedelta(days=1)
 
+    accidents = Accident.objects.filter(
+        datetime__gte=one_day_ago
+    )
     # Lọc
     accident_type = request.GET.get('accident_type')
     damage_level = request.GET.get('damage_level')
