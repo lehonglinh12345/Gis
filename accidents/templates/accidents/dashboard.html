@@ -449,7 +449,12 @@
             pointerEvents: isDetailedView ? 'none' : 'auto'
         });
 
-        if (!map.hasLayer(markerLayerGroup)) map.addLayer(markerLayerGroup);
+        if (isDetailedView) {
+            
+            if (!map.hasLayer(markerLayerGroup)) map.addLayer(markerLayerGroup); // Ẩn marker khi zoom >= 11
+        } else {
+            map.removeLayer(markerLayerGroup); // Hiện marker khi zoom < 11
+        }
     }
 
     // --- CLICK BẢN ĐỒ ---
