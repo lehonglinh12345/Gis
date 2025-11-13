@@ -131,7 +131,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LANGUAGE_CODE = 'vi'
 TIME_ZONE = 'Asia/Ho_Chi_Minh'
 USE_I18N = True
-USE_TZ = True
+USE_TZ = False
 
 STATIC_URL = '/static/'
 ALLOWED_HOSTS = ['*']
